@@ -26,13 +26,11 @@ shinyUI(fluidPage(
             #h3("Bye"))
         ),
         sidebarPanel(
-            sliderInput("bins",
-                        "Number of bins:",
-                        min = 1,
-                        max = 50,
-                        value = 30),
             #p(outputOptions("countryVector")),
-            p(selectInput("selectedCountry", "Country",textOutput("countryVector"), selected=""))
+            p(selectInput("selectedCountry", "Country",textOutput("countryVector"), selected="")),
+            p(plotlyOutput("cumPlot")),
+            p(plotlyOutput("dayPlot")),
+            p(selectInput("plotType","Plottype",c("log","not log?"), selected = "not log?"))
         )
     )
 ))
