@@ -11,28 +11,39 @@ library(leaflet)
 library(plotly)
 
 # Define UI for application that draws a histogram
-shinyUI(fluidPage(
+shinyUI(navbarPage("Covid-19 Liveticker",
 
     # Application title
-    titlePanel("Covid-19 Liveticker"),
+    tabsetPanel(id = "tabs",
+                tabPanel("Total Cases",value = "total"),
+      tabPanel("New Cases",value = "new")
+    ),
 
     # Sidebar with a slider input for number of bins
     sidebarLayout(
 
         # Show a plot of the generated distribution
-        mainPanel(
+        sidebarPanel(
             leafletOutput("worldMap")#,
             #p(h3("Hello"),
             #    h3(verbatimTextOutput("country")),
             #h3("Bye"))
         ),
-        sidebarPanel(
+        mainPanel(
             #p(outputOptions("countryVector")),
-            p(selectInput("selectedCountry", "Country",textOutput("countryVector"), selected="")),
-            p(selectInput("scaleType", "Scale",list("linear","log"), selected="log")),
             p(plotlyOutput("cumPlot")),
             p(plotlyOutput("dayPlot")),
-            p(selectInput("plotType","Plottype",c("log","not log?"), selected = "not log?"))
+            fluidRow(
+              column(4,
+                     selectInput("selectedCountry", "Country",textOutput("countryVector"), selected="")
+                     ),
+              column(4,
+                     selectInput("scaleType", "Scale",list("linear","log"), selected="log")
+                     ),
+              column(4,
+                     selectInput("dataType","Plottype",c("Cases","Active","Deaths"), selected = "Cases")
+              )
+            )
         )
     )
 ))
