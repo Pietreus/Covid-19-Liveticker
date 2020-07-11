@@ -24,33 +24,18 @@ library(tidyr)
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
-    
-    observeEvent(input$worldMap_shape_click, { # update the location selectInput on map clicks
-        p <- input$worldMap_shape_click
-        output$country <- renderText(p$id) #p$id 
-        print(p)
-        output$cumPlot <- renderPlotly({
-            plot_ly(type = "scatter", data = covidData[covidData$ISO3 == p$id & covidData$casesCum >= 10 ,], x = ~date, y= ~casesCum, mode = 'lines', name = 'cases') %>%
-                add_trace(x = ~date, y = ~deathsCum, name = 'deaths') %>%
-                add_trace(x = ~date, y = ~active, name = 'active Cases') %>%
-                layout(plot, yaxis = list(type = "log"))
-        })
-        output$dayPlot <- renderPlotly({
-            plot_ly(type = "bar", data = covidData[covidData$ISO3 == p$id & covidData$casesCum >= 10 ,], x = ~date, y= ~casesNew, mode = 'lines', name = 'cases') %>%
-                add_trace(x = ~date, y = ~deathsNew, name = 'deaths')
-                
-        })
-    })
-
+  
     covidData <- getData()
     
-     
     covid_plot <- group_by(covidData,ISO3) %>% 
         filter(row_number() == 1) %>%
         summarise(cases = casesCum,  
                   deaths = deathsCum,
                   active = active,
                   labelText = paste("<p>", ISO3, "<br>Total Cases: ", casesCum, " <br>Deaths: ", deathsCum,"<br>Active Cases: ", active, "</p>", sep= ""))
+    covid_long <- pivot_longer(data = covidData, cols = -c(ISO3,date),names_to = "Type",values_to = "Amount",values_drop_na = TRUE)
+    covid_long_cum <- covid_long %>% filter(Type %in% c("casesCum","deathsCum","recovCum"))
+    covid_long_new <- covid_long %>% filter(Type %in% c("casesNew","deathsNew","recovNew"))
     
     world_spdf <- readOGR( 
         dsn= paste0(getwd(),"/data/") , 
@@ -71,22 +56,59 @@ shinyServer(function(input, output) {
                     color = ~mypalette(cases),
                     label = lapply(world_spdf@data$labelText, htmltools::HTML)) %>%
         addLegend(pal = mypalette, values=~cases, opacity=0.9, title = "Cases", position = "bottomleft")
-        
+    
+    observeEvent(input$worldMap_shape_click, updateMaps())
+    observeEvent(input$scaleType, updateMaps())
+    
     output$worldMap <- renderLeaflet(myMap)
     output$countryVector <- renderText(as.character(world_spdf@data$NAME))
     
+    # output$cumPlot <- renderPlotly({
+    #     plot_ly(type = "scatter", data = covidData[covidData$ISO3 == "AUT" &covidData$casesCum > 0 ,], x = ~date, y= ~casesCum)
+    # })
     
     
-    output$cumPlot <- renderPlotly({
-        plot_ly(type = "scatter", data = covidData[covidData$ISO3 == "AUT" &covidData$casesCum > 0 ,], x = ~date, y= ~casesCum)
-    })    
-        
-
+      # update the location selectInput on map clicks
+      
+      updateMaps <- function(){
+      
+        if(!is.null(input$worldMap_shape_click)){
+          p <- input$worldMap_shape_click
+        }else{
+          p <- data.frame(id = "AUT")
+        }
+        output$country <- renderText(p$id) #p$id
+        print(p)
+      cplot <- filter(covid_long_cum, ISO3 == p$id & Amount >= 10) %>%
+        ggplot(aes(x = date, y = Amount, color = Type)) +
+        geom_line()
+      if(input$scaleType=="log"){
+        cplot <- cplot + scale_y_log10()
+      }
+      output$cumPlot <- renderPlotly({
+        ggplotly(cplot,dynamicTicks = TRUE) %>% layout(hovermode = 'compare')
+        # plot_ly(type = "scatter", data = covidData[covidData$ISO3 == p$id & covidData$casesCum >= 10 ,], x = ~date, y= ~casesCum, mode = 'lines', name = 'cases') %>%
+        #     add_trace(x = ~date, y = ~deathsCum, name = 'deaths') %>%
+        #     add_trace(x = ~date, y = ~active, name = 'active Cases') %>%
+        #     layout(plot, yaxis = list(type = "log"))
+      })
+      nplot <- filter(covid_long_new, ISO3 == p$id & Amount >= 10) %>%
+        ggplot() +
+        geom_bar(aes(x = date,y = Amount, fill = Type),stat='identity',position = 'dodge')
+      output$dayPlot <- renderPlotly({
+        ggplotly(nplot,dynamicTicks = TRUE) %>% layout(hovermode = 'compare')
+        # plot_ly(type = "bar", data = covidData[covidData$ISO3 == p$id & covidData$casesCum >= 10 ,], x = ~date, y= ~casesNew, mode = 'lines', name = 'cases') %>%
+        #     add_trace(x = ~date, y = ~deathsNew, name = 'deaths')
+      })
+    }  
+    
 })
 
-getData <- function(){
 
-    dataRaw <- read.csv("https://covid.ourworldindata.org/data/owid-covid-data.csv") %>% mutate(date = ymd(date),ISO3 = as.character(iso_code)) #cases,deaths,tests,new and cumsum, abs and per mil/tsd
+
+getData <- function(){
+    dataRaw <- read.csv("https://covid.ourworldindata.org/data/owid-covid-data.csv") %>% 
+      mutate(date = ymd(date),ISO3 = as.character(iso_code)) #cases,deaths,tests,new and cumsum, abs and per mil/tsd
     datarecov <- read.csv("https://datahub.io/core/covid-19/r/time-series-19-covid-combined.csv") %>% 
         transmute(ISO3 = countrycode(Country.Region, origin = "country.name", destination = "iso3c"),
                   date = ymd(Date),
@@ -105,7 +127,6 @@ getData <- function(){
                   testsCum = total_tests, testsNew = new_tests,
                   active = total_cases - recovCum - deathsCum) %>%
         arrange(desc(date))
-    
 }
 
 

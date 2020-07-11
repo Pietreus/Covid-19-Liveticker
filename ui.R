@@ -29,6 +29,7 @@ shinyUI(fluidPage(
         sidebarPanel(
             #p(outputOptions("countryVector")),
             p(selectInput("selectedCountry", "Country",textOutput("countryVector"), selected="")),
+            p(selectInput("scaleType", "Scale",list("linear","log"), selected="log")),
             p(plotlyOutput("cumPlot")),
             p(plotlyOutput("dayPlot")),
             p(selectInput("plotType","Plottype",c("log","not log?"), selected = "not log?"))
