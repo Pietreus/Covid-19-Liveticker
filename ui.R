@@ -11,39 +11,49 @@ library(leaflet)
 library(plotly)
 
 # Define UI for application that draws a histogram
-shinyUI(navbarPage("Covid-19 Liveticker",
+shinyUI(fluidPage("Covid-19 Liveticker",
 
     # Application title
-    tabsetPanel(id = "tabs",
-                tabPanel("Total Cases",value = "total"),
-      tabPanel("New Cases",value = "new")
+    tabsetPanel(id = "dataType",
+                tabPanel("Total Infections",value = "Cases"),
+                tabPanel("Active Cases",value = "Active"),
+                tabPanel("Total Deaths",value = "Deaths")
     ),
-
+    #idee für Datendarstellung:
+    #Fallzahlen, Land,etc mit Slider für Datum
+    
     # Sidebar with a slider input for number of bins
     sidebarLayout(
-
         # Show a plot of the generated distribution
         sidebarPanel(
-            leafletOutput("worldMap")#,
+          uiOutput("countryVector"),
+          htmlOutput("summary"),
+          radioButtons("plotType","Plottype",c("Total","Daily"), selected = "Total"),
+          
+          
+            
             #p(h3("Hello"),
-            #    h3(verbatimTextOutput("country")),
-            #h3("Bye"))
+          conditionalPanel(condition = "input.plotType != 'Daily'",radioButtons("scaleType","Scale",list("linear","log"), selected="log"))
+            
         ),
         mainPanel(
             #p(outputOptions("countryVector")),
-            p(plotlyOutput("cumPlot")),
-            p(plotlyOutput("dayPlot")),
-            fluidRow(
-              column(4,
-                     selectInput("selectedCountry", "Country",textOutput("countryVector"), selected="")
-                     ),
-              column(4,
-                     selectInput("scaleType", "Scale",list("linear","log"), selected="log")
-                     ),
-              column(4,
-                     selectInput("dataType","Plottype",c("Cases","Active","Deaths"), selected = "Cases")
-              )
+            # p(plotlyOutput("cumPlot")),
+            # p(plotlyOutput("dayPlot")),
+            leafletOutput("worldMap"),
+            plotlyOutput("detailPlot")#,
+            # fluidRow(
+            #   column(4,
+            #          uiOutput("countryVector")
+            #          ),
+            #   column(4,
+            #          # selectInput("scaleType", "Scale",list("linear","log"), selected="log"),
+            #          #radioButtons("scaleType","Scale",list("linear","log"), selected="log")
+            #          ),
+            #   column(4,
+            #          #radioButtons("plotType","Plottype",c("Total","Daily"), selected = "Total")
+            #          )
             )
         )
     )
-))
+    )
