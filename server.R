@@ -8,8 +8,8 @@
 # https://www.r-graph-gallery.com/183-choropleth-map-with-leaflet.html map
 #https://data.humdata.org/dataset/novel-coronavirus-2019-ncov-cases/resource/fc5fddb7-2f59-4809-a023-8ed33c41012a datasets
 #
-
 library(shiny)
+library(tictoc)
 library(leaflet)
 library(maps)
 library(dplyr)
@@ -25,84 +25,25 @@ library(stringr)
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
+  tic("getData")
   covidData <- getData()
+  toc()
   
-  covid_plot <- group_by(covidData, ISO3) %>%
-    filter(row_number() == 1) %>%
-    summarise(
-      cases = casesCum,
-      deaths = deathsCum,
-      active = active,
-      labelText = paste(
-        "<p>",
-        ISO3,
-        "<br>Total Cases: ",
-        casesCum,
-        " <br>Deaths: ",
-        deathsCum,
-        "<br>Active Cases: ",
-        active,
-        "</p>",
-        sep = ""
-      )
-    )
-  covid_long <-
-    pivot_longer(
-      data = covidData,
-      cols = -c(ISO3, date),
-      names_to = "Type",
-      values_to = "Amount",
-      values_drop_na = TRUE) %>% 
-    mutate(Type = str_replace_all(Type,"casesCum","total Cases")) %>% 
-    mutate(Type = str_replace_all(Type,"deathsCum","total Deaths")) %>%
-    mutate(Type =  str_replace_all(Type,"recovCum","total Recovered")) %>%
-    mutate(Type = str_replace_all(Type,"casesNew","daily Cases")) %>% 
-    mutate(Type = str_replace_all(Type,"deathsNew","daily Deaths")) %>%
-    mutate(Type =  str_replace_all(Type,"recovNew","daily Recovered"))
-  
-  
-  # covid_long$Type <- reorder(as.factor(covid_long$Type),c("deathCum","casesCum","recovCum","deathNew","casesNew","recovNew","active","testsCum","testsNew"))
-  # covid_long$Type <- relevel(as.factor(covid_long$Type),"recovCum")
-  # covid_long$Type <- relevel(as.factor(covid_long$Type),"recovNew")
-  # covid_long$Type <- relevel(as.factor(covid_long$Type),"deathsCum")
-  # covid_long$Type <- relevel(as.factor(covid_long$Type),"deathsNew")
-  covid_long_cum <-
-    covid_long %>% filter(Type %in% c("total Cases", "total Deaths", "total Recovered"))
-  covid_long_new <-
-    covid_long %>% filter(Type %in% c("daily Cases", "daily Deaths", "daily Recovered"))
-  
-  
-  
-  
-  
-  world_spdf <- readOGR(
-    dsn = paste0(getwd(), "/data/") ,
-    layer = "TM_WORLD_BORDERS_SIMPL-0.3",
-    verbose = FALSE
-  )
-  world_spdf@data <-
-    left_join(world_spdf@data, covid_plot, by = c("ISO3" = "ISO3"))
-  
+  tic("drawMap")
   output$worldMap <-
-    renderLeaflet(drawMap(input$dataType, world_spdf))
+    renderLeaflet(drawMap(input$dataType, covidData))
+  toc()
   
-  observeEvent(input$worldMap_shape_click, 
-               {
-                 updateMaps(input$plotType)
-                 
-                 
-               })
+  tic("UpdateMaps events")
+  observeEvent(input$worldMap_shape_click, updateMaps(input$plotType))
   observeEvent(input$scaleType, updateMaps(input$plotType))
   observeEvent(input$plotType, updateMaps(input$plotType))
   observeEvent(input$selectedCountry, updateMaps(input$plotType,TRUE))
-  
-  #output$worldMap <- renderLeaflet(myMap)
-  #output$countryVector <-
-  
+  toc()
   
   # update the location selectInput on map clicks
-  
   updateMaps <- function(displayType,dropDown=FALSE) {
+    tic("inside updateMaps")
     if(dropDown){
       p <- data.frame(id = countrycode(input$selectedCountry, origin = "country.name", destination = "iso3c"))
     }else{
@@ -111,43 +52,40 @@ shinyServer(function(input, output) {
       } else{
         p <- data.frame(id = "AUT")
       }
-      output$countryVector <- renderUI({selectInput('selectedCountry', 'Country', (as.character(world_spdf@data$NAME)),selected = countrycode(p$id, origin = "iso3c", destination = "country.name"))})
+      output$countryVector <- renderUI({
+        selectInput('selectedCountry',
+                    'Country',
+                    unique(covidData$Country.Region),
+                    selected = countrycode(p$id, origin = "iso3c", destination = "country.name"))})
     }
-    output$summary <- renderText(countrySummary(covid_long,p$id))
-    #output$country <- renderText(p$id)
-    #print(p)
-    
+    output$summary <- renderText(countrySummary(covidData,p$id))
+    # options(repr.plot.width = 1, repr.plot.height = 10)
+    detailPlot <- filter(covidData,ISO3 == p$id & amount >=1 & mode == displayType) %>%
+      ggplot(aes(x = date, y = amount)) +
+      labs(
+        title = paste0(displayType," Covid-19 cases in ",countrycode(p$id, origin = "iso3c", destination = "country.name")),
+        subtitle = paste0("data as of ", today()))
     if (displayType == "Total") {
-      cplot <- filter(covid_long_cum, ISO3 == p$id & Amount >= 1) %>%
-        ggplot(aes(x = date, y = Amount, color = Type)) +
-        geom_line() + 
-        labs(
-          title = paste0(displayType," Covid-19 cases in ",countrycode(p$id, origin = "iso3c", destination = "country.name")), 
-          subtitle = paste0("data as of ", today()))
+      detailPlot <- detailPlot + geom_line(aes(color = type))
       if (input$scaleType == "log") {
-        cplot <- cplot + scale_y_log10()
+        detailPlot <- detailPlot + scale_y_log10()
       }
-      output$detailPlot <- renderPlotly({
-        ggplotly(cplot, dynamicTicks = TRUE) %>% layout(hovermode = 'compare')
-      })
     }else{
-      nplot <- filter(covid_long_new, ISO3 == p$id & Amount >= 10) %>%
-        ggplot() +
-        geom_bar(aes(x = date, y = Amount, fill = Type),
+      detailPlot <- detailPlot +
+        geom_bar(aes(fill = type),
                  stat = 'identity',
-                 position = 'dodge') + 
-        labs(
-          title = paste0(displayType," Covid-19 cases in ",countrycode(p$id, origin = "iso3c", destination = "country.name")), 
-          subtitle = paste0("data as of ", today()))
-      output$detailPlot <- renderPlotly({
-        ggplotly(nplot, dynamicTicks = TRUE) %>% layout(hovermode = 'compare')
-      })
+                 position = position_dodge2())
     }
-    
+    output$detailPlot <- renderPlotly({
+      ggplotly(detailPlot, dynamicTicks = !(input$scaleType == "log" & displayType=="Total")) %>% layout(hovermode = 'compare')
+    })
+    toc()
   }
+  
 })
 
-getData <- function() {
+getData <- function(){
+  #cache data
   if (file.exists("./data/covid.RData")) {
     load("./data/covid.RData")
     if (max(covidData$date) == today()-days(1)) {
@@ -155,54 +93,90 @@ getData <- function() {
     }
   }
   
-  dataRaw <-
-    read.csv("https://covid.ourworldindata.org/data/owid-covid-data.csv") %>%
-    mutate(date = ymd(date), ISO3 = as.character(iso_code)) #cases,deaths,tests,new and cumsum, abs and per mil/tsd
-  datarecov <-
-    read.csv("https://datahub.io/core/covid-19/r/time-series-19-covid-combined.csv") %>%
-    transmute(
-      ISO3 = countrycode(Country.Region, origin = "country.name", destination = "iso3c"),
-      date = ymd(Date),
-      recovCum = Recovered
-    ) %>%
-    group_by(ISO3, date) %>%
-    filter(row_number() == 1) %>%
+  #download raw data from johns hopkins and reformat
+  
+  casesraw <- 
+    read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/
+             csse_covid_19_time_series/time_series_covid19_confirmed_global.csv") %>% 
+    pivot_longer(-c(Province.State,Country.Region,Lat,Long),names_to = "date") %>% mutate(type = "cases")
+  
+  deathsraw <- 
+    read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/
+                        csse_covid_19_time_series/time_series_covid19_deaths_global.csv") %>% 
+    pivot_longer(-c(Province.State,Country.Region,Lat,Long),names_to = "date") %>% mutate(type = "deaths")
+  
+  recovraw <- 
+    read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/
+                       csse_covid_19_time_series/time_series_covid19_recovered_global.csv") %>% 
+    pivot_longer(-c(Province.State,Country.Region,Lat,Long),names_to = "date") %>% mutate(type = "recovered")
+  
+  
+  totalData <- bind_rows(casesraw,deathsraw,recovraw) %>% 
+    mutate(ISO3 = countrycode(Country.Region, origin = "country.name", destination = "iso3c")) %>%
+    #get one column for every country
+    group_by(ISO3,Country.Region,date,type) %>%
+    summarise(amount = sum(value)) %>%
     ungroup() %>%
-    group_by(ISO3) %>%
-    mutate(recovNew = recovCum - lead(recovCum, 1, default = 0, order_by = desc(date)))
-  covidData <-
-    left_join(dataRaw, datarecov, by = c("ISO3" = "ISO3", "date" = "date")) %>%
-    fill(recovCum, .direction = "up") %>%
-    transmute(
-      ISO3 = iso_code,
-      date = ymd(date),
-      casesCum = total_cases,
-      casesNew = new_cases,
-      deathsCum = total_deaths,
-      deathsNew = new_deaths,
-      recovCum,
-      recovNew,
-      testsCum = total_tests,
-      testsNew = new_tests,
-      active = total_cases - recovCum - deathsCum
-    ) %>%
-    arrange(desc(date)) %>% filter(date <= today()-days(1))
+    mutate(date = mdy(substring(date,2)),mode = "Total")
+  
+  #calculate daily cases
+  dailyData <- totalData %>% 
+    group_by(Country.Region,ISO3,type) %>%
+    mutate(amount = amount - lead(amount, 1, default = 0, order_by = desc(date)),mode = "Daily") %>%
+    ungroup()
+  
+  #active cases = cases - deaths - recovered, data is presorted so simple diff is possible
+  activeData <- totalData %>%
+    group_by(Country.Region,ISO3,date) %>%
+    summarise(amount = amount[1] - amount[2] - amount[3],type = "active", mode = "Active")
+  
+  
+  covidData <- bind_rows(dailyData,totalData,activeData)
+  #save for caching
   save('covidData', file = "./data/covid.RData")
   return(covidData)
 }
 
-drawMap <- function(dataType, world_spdf) {
-  if (dataType == "Cases") {
+drawMap <- function(datatype, covidData) {
+  tic("inside drawmap")
+  #read cached data if possible
+  if (file.exists("./data/worldData.RData")) {
+    load("./data/worldData.RData")
+  }else{
+    #use wider format for geojson data
+    covid_plot <- 
+      group_by(covidData, ISO3,type) %>%
+      filter(mode != "Daily",row_number() == n()) %>%
+      transmute( 
+        ISO3 = ISO3,
+        labelText = Country.Region,
+        amount = amount,
+        type = type) %>% pivot_wider(names_from = type,values_from = amount)
+    
+    #download geojsons and add covid data
+    download.file("http://thematicmapping.org/downloads/TM_WORLD_BORDERS_SIMPL-0.3.zip" , destfile="data/world_shape_file.zip")
+    system("unzip data/world_shape_file.zip")
+    world_spdf <- readOGR(
+      dsn = paste0(getwd(), "/data/") ,
+      layer = "TM_WORLD_BORDERS_SIMPL-0.3",
+      verbose = FALSE
+    )
+    world_spdf@data <-
+      left_join(world_spdf@data, covid_plot, by = c("ISO3" = "ISO3"))
+    save('world_spdf', file = "./data/worldData.RData")
+  }
+  
+  if (datatype == "Cases") {
     paletteString <- "YlOrBr"
     domainData <- world_spdf@data$cases
-  } else if (dataType == "Deaths") {
+  } else if (datatype == "Deaths") {
     paletteString <- "Greys"
     domainData <- world_spdf@data$deaths
   } else{
     paletteString <- "YlGnBu"
     domainData <- world_spdf@data$active
   }
-  mybins <- c(0,signif(quantile(domainData,seq(0.15,0.95,0.2), na.rm = T),digits = 1),Inf)
+  mybins <- c(0,signif(quantile(domainData,seq(0.175,0.975,0.2), na.rm = T),digits = 1),Inf)
   # mybins <- c(0, 10000, 20000, 50000, 100000, 500000, Inf)
   mypalette <-
     colorBin(
@@ -212,7 +186,7 @@ drawMap <- function(dataType, world_spdf) {
       bins = mybins
     )
   #renderPlot({
-  leaflet(world_spdf) %>%
+  map <- leaflet(world_spdf) %>%
     setView(lat = 10, lng = 0 , zoom = 1) %>%
     addTiles() %>%
     addPolygons(
@@ -227,38 +201,34 @@ drawMap <- function(dataType, world_spdf) {
       pal = mypalette,
       values =  ~ domainData,
       opacity = 0.9,
-      title = dataType,
+      title = datatype,
       position = "bottomleft"
     )
+  toc()
+  return(map)
   
 }
 
-countrySummary <- function(data,iso3,date=today()-days(1)){
-  relevantdata <- data[data$ISO3 == iso3,] %>% group_by(Type) %>% filter(row_number()==1) #%>% transmute(growth)
-  
+countrySummary <- function(data,ISO3,date=today()-days(1)){
+  relevantdata <- data[data$ISO3 == ISO3,] %>% group_by(type) %>% filter(row_number()==n(),mode!="Daily")
   paste0(
-    "<h3>",countrycode(iso3, origin = "iso3c", destination = "country.name"),
-    "</h3>
-    <table>
-    <caption>Stats</caption>
+    "<table>
+    <caption>",ISO3,"</caption>
     <tr>
     <td style='padding-right: 10px;'>Total Cases </td>
-    <td>",relevantdata$Amount[relevantdata$Type=="total Cases"],"</td>
+    <td>",relevantdata$amount[relevantdata$type=="cases"],"</td>
     </tr>
     <tr>
-    <td style='padding-right: 10px;'>Active Cases  </td>
-    <td>",relevantdata$Amount[relevantdata$Type=="active"],"</td>
+    <td style='padding-right: 10px;'>Recovered</td>
+    <td>",relevantdata$amount[relevantdata$type=="recovered"],"</td>
+    </tr>
+    <tr>
+    <td style='padding-right: 10px;'>Active Cases</td>
+    <td>",relevantdata$amount[relevantdata$type=="active"],"</td>
     </tr>
     <tr>
     <td style='padding-right: 10px;'>Total Deaths  </td>
-    <td>",relevantdata$Amount[relevantdata$Type=="total Deaths"],"</td>",
-    # </tr>
-    # <tr>
-    # <td>Growth Rate (3 Day avg) </td>
-    # <td>","GROWTH TBD","</td>
-    # </tr>,
-    "</table>"
+    <td>",relevantdata$amount[relevantdata$type=="deaths"],"</td>
+    </table>"
   )
-  
-  
 }
