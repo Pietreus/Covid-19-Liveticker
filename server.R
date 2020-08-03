@@ -52,10 +52,12 @@ shinyServer(function(input, output) {
       } else{
         p <- data.frame(id = "AUT")
       }
+      if(!p$id %in% covidData$ISO3){return()}
+      print(p$id)
       output$countryVector <- renderUI({
         selectInput('selectedCountry',
                     'Country',
-                    unique(covidData$Country.Region),
+                    countrycode(unique(covidData$Country.Region),origin = "country.name", destination = "country.name"),
                     selected = countrycode(p$id, origin = "iso3c", destination = "country.name"))})
     }
     output$summary <- renderText(countrySummary(covidData,p$id))
@@ -163,6 +165,7 @@ drawMap <- function(datatype, covidData) {
     )
     world_spdf@data <-
       left_join(world_spdf@data, covid_plot, by = c("ISO3" = "ISO3"))
+    world_spdf@data$labelText[is.na(world_spdf@data$labelText)] <- "data missing"
     save('world_spdf', file = "./data/worldData.RData")
   }
   
@@ -176,7 +179,12 @@ drawMap <- function(datatype, covidData) {
     paletteString <- "YlGnBu"
     domainData <- world_spdf@data$active
   }
-  mybins <- c(0,signif(quantile(domainData,seq(0.175,0.975,0.2), na.rm = T),digits = 1),Inf)
+  #calculate nice upper limit for the map
+  
+  maxval <- max(domainData,na.rm = TRUE)
+  power <- floor(log10(maxval))
+  
+  mybins <- c(0,signif(quantile(domainData,seq(0.175,0.975,0.2), na.rm = T),digits = 1),ceiling(maxval/10^power)*10^power)
   # mybins <- c(0, 10000, 20000, 50000, 100000, 500000, Inf)
   mypalette <-
     colorBin(

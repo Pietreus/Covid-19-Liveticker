@@ -27,7 +27,6 @@ shinyUI({
                 tipify(conditionalPanel(
                   condition = "input.plotType != 'Daily'",radioButtons("scaleType","y-axis scaling",list("linear","log"), selected="log")),title = "Change the y-axis scaling")),
               mainPanel(
-                tipify(leafletOutput("worldMap"),
-                       title = "select Country for Information"),
+                leafletOutput("worldMap"),
                 plotlyOutput("detailPlot"))))
 })
