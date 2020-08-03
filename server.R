@@ -1,49 +1,30 @@
-#
-# This is the server logic of a Shiny web application. You can run the
-# application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-# https://www.r-graph-gallery.com/183-choropleth-map-with-leaflet.html map
-#https://data.humdata.org/dataset/novel-coronavirus-2019-ncov-cases/resource/fc5fddb7-2f59-4809-a023-8ed33c41012a datasets
-#
 library(shiny)
-library(tictoc)
-library(leaflet)
-library(maps)
+#data
 library(dplyr)
-library(rgdal)
-library(openxlsx)
-library(RColorBrewer)
-library(htmltools)
-library(countrycode)
-library(plotly)
-library(lubridate)
 library(tidyr)
-library(stringr)
+library(lubridate)
+#maps
+library(rgdal)
+library(leaflet)
+library(countrycode)
+#display
+library(htmltools)
+library(plotly)
+library(RColorBrewer)
 
-# Define server logic required to draw a histogram
 shinyServer(function(input, output) {
-  tic("getData")
   covidData <- getData()
-  toc()
   
-  tic("drawMap")
   output$worldMap <-
     renderLeaflet(drawMap(input$dataType, covidData))
-  toc()
+  #all input events that require an action from the server
+  observeEvent(input$worldMap_shape_click, updateInfo(input$plotType))
+  observeEvent(input$scaleType, updateInfo(input$plotType))
+  observeEvent(input$plotType, updateInfo(input$plotType))
+  observeEvent(input$selectedCountry, updateInfo(input$plotType,TRUE))
   
-  tic("UpdateMaps events")
-  observeEvent(input$worldMap_shape_click, updateMaps(input$plotType))
-  observeEvent(input$scaleType, updateMaps(input$plotType))
-  observeEvent(input$plotType, updateMaps(input$plotType))
-  observeEvent(input$selectedCountry, updateMaps(input$plotType,TRUE))
-  toc()
-  
-  # update the location selectInput on map clicks
-  updateMaps <- function(displayType,dropDown=FALSE) {
-    tic("inside updateMaps")
+  # update the displayed country info
+  updateInfo <- function(displayType,dropDown=FALSE) {
     if(dropDown){
       p <- data.frame(id = countrycode(input$selectedCountry, origin = "country.name", destination = "iso3c"))
     }else{
@@ -81,9 +62,7 @@ shinyServer(function(input, output) {
     output$detailPlot <- renderPlotly({
       ggplotly(detailPlot, dynamicTicks = !(input$scaleType == "log" & displayType=="Total")) %>% layout(hovermode = 'compare')
     })
-    toc()
   }
-  
 })
 
 getData <- function(){
@@ -96,7 +75,6 @@ getData <- function(){
   }
   
   #download raw data from johns hopkins and reformat
-  
   casesraw <- 
     read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/
              csse_covid_19_time_series/time_series_covid19_confirmed_global.csv") %>% 
@@ -140,7 +118,6 @@ getData <- function(){
 }
 
 drawMap <- function(datatype, covidData) {
-  tic("inside drawmap")
   #read cached data if possible
   if (file.exists("./data/worldData.RData")) {
     load("./data/worldData.RData")
@@ -185,15 +162,15 @@ drawMap <- function(datatype, covidData) {
   power <- floor(log10(maxval))
   
   mybins <- c(0,signif(quantile(domainData,seq(0.175,0.975,0.2), na.rm = T),digits = 1),ceiling(maxval/10^power)*10^power)
-  # mybins <- c(0, 10000, 20000, 50000, 100000, 500000, Inf)
+  #colorpalette with custom bins depending on cases
   mypalette <-
     colorBin(
       palette = paletteString,
       domain = domainData,
       na.color = "transparent",
-      bins = mybins
-    )
-  #renderPlot({
+      bins = mybins)
+  
+  #leaflet map 
   map <- leaflet(world_spdf) %>%
     setView(lat = 10, lng = 0 , zoom = 1) %>%
     addTiles() %>%
@@ -203,20 +180,16 @@ drawMap <- function(datatype, covidData) {
       fillOpacity = 0.8,
       smoothFactor = 0.5,
       color = ~ mypalette(domainData),
-      label = lapply(world_spdf@data$labelText, htmltools::HTML)
-    ) %>%
+      label = lapply(world_spdf@data$labelText, htmltools::HTML)) %>%
     addLegend(
       pal = mypalette,
       values =  ~ domainData,
       opacity = 0.9,
       title = datatype,
-      position = "bottomleft"
-    )
-  toc()
+      position = "bottomleft")
   return(map)
-  
 }
-
+#this function formats the stats to be displayed for each country
 countrySummary <- function(data,ISO3,date=today()-days(1)){
   relevantdata <- data[data$ISO3 == ISO3,] %>% group_by(type) %>% filter(row_number()==n(),mode!="Daily")
   paste0(
